@@ -10,7 +10,7 @@ import {
   Legend,
   ResponsiveContainer
 } from "recharts";
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 const isLocalHost = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
 
 const API_BASE_CANDIDATES = isLocalHost
