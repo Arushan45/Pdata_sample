@@ -7,3 +7,4 @@ frontend/*.log
 !.env.example
 .vscode/settings.json
 *.pyc
+node_modules/

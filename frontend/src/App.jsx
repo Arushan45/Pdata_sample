@@ -1,8 +1,35 @@
-const { useState, useEffect } = React;
-const API_BASE_URL =
-  window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost"
-    ? "http://127.0.0.1:8001"
-    : "https://backend-nine-murex-11.vercel.app";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer
+} from "recharts";
+import { useState, useEffect } from "react";
+const isLocalHost = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
+
+const API_BASE_CANDIDATES = isLocalHost
+  ? ["http://127.0.0.1:8001", "http://127.0.0.1:8000", "https://backend-nine-murex-11.vercel.app"]
+  : ["https://backend-nine-murex-11.vercel.app"];
+
+async function apiFetch(path, options = {}) {
+  let lastNetworkError = null;
+
+  for (const baseUrl of API_BASE_CANDIDATES) {
+    try {
+      return await fetch(`${baseUrl}${path}`, options);
+    } catch (err) {
+      lastNetworkError = err;
+    }
+  }
+
+  throw lastNetworkError || new Error("Backend is not reachable");
+}
 
 function DynamicPlantForm({ plantId }) {
   const [schema, setSchema] = useState(null);
@@ -14,7 +41,7 @@ function DynamicPlantForm({ plantId }) {
 
   const fetchSchema = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/schema/${plantId}`);
+      const response = await apiFetch(`/schema/${plantId}`);
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.detail || "Failed to load schema");
@@ -40,7 +67,7 @@ function DynamicPlantForm({ plantId }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch(`${API_BASE_URL}/data/submit`, {
+      const response = await apiFetch(`/data/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -67,7 +94,7 @@ function DynamicPlantForm({ plantId }) {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/schema/${plantId}/remove-field/${encodeURIComponent(field.name)}`, {
+      const response = await apiFetch(`/schema/${plantId}/remove-field/${encodeURIComponent(field.name)}`, {
         method: "DELETE"
       });
       const result = await response.json();
@@ -107,7 +134,7 @@ function DynamicPlantForm({ plantId }) {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/schema/${plantId}/add-field`, {
+      const response = await apiFetch(`/schema/${plantId}/add-field`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -327,7 +354,7 @@ function FactoryChatbot() {
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/chat`, {
+      const response = await apiFetch(`/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: trimmedQuestion })
@@ -391,8 +418,152 @@ function FactoryChatbot() {
   );
 }
 
+function UnidilDashboard() {
+  const today = new Date();
+  const defaultEndDate = today.toISOString().split("T")[0];
+  const startSeed = new Date(today);
+  startSeed.setDate(startSeed.getDate() - 7);
+  const defaultStartDate = startSeed.toISOString().split("T")[0];
+
+  const [chartData, setChartData] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [startDate, setStartDate] = useState(defaultStartDate);
+  const [endDate, setEndDate] = useState(defaultEndDate);
+  const [appliedFilter, setAppliedFilter] = useState({ startDate: defaultStartDate, endDate: defaultEndDate });
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        setIsLoading(true);
+        setError("");
+        const params = new URLSearchParams({
+          start_date: appliedFilter.startDate,
+          end_date: appliedFilter.endDate
+        });
+        const response = await apiFetch(`/api/dashboard/unidil?${params.toString()}`);
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.detail || "Failed to load dashboard data");
+        }
+        setChartData(Array.isArray(data) ? data : []);
+      } catch (err) {
+        setError(err.message || "Failed to load dashboard data");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [appliedFilter]);
+
+  const handleApplyFilter = () => {
+    if (startDate > endDate) {
+      setError("Start Date cannot be after End Date.");
+      return;
+    }
+
+    setAppliedFilter({ startDate, endDate });
+  };
+
+  const filterBar = (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col items-end gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 md:w-auto">
+          <label className="block text-sm font-medium text-slate-700">
+            <span className="mb-1 block">Start Date</span>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+            />
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            <span className="mb-1 block">End Date</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+            />
+          </label>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleApplyFilter}
+          className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300 md:w-auto"
+        >
+          Apply Filter
+        </button>
+      </div>
+    </div>
+  );
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        {filterBar}
+        <div className="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-600 shadow-sm">
+          Loading analytics dashboard...
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-4">
+        {filterBar}
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700 shadow-sm">
+          Error: {error}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {filterBar}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <div className="rounded-lg bg-white p-4 shadow-md">
+          <h3 className="mb-3 text-lg font-semibold text-slate-900">Yield Trends</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Line type="monotone" dataKey="Corrugator Yield (%)" stroke="#007BFF" strokeWidth={2} />
+              <Line type="monotone" dataKey="Tuber Yield (%)" stroke="#28A745" strokeWidth={2} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="rounded-lg bg-white p-4 shadow-md">
+          <h3 className="mb-3 text-lg font-semibold text-slate-900">Downtime Analysis</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="Corrugator Downtime (min)" fill="#FFC107" />
+              <Bar dataKey="Tuber Downtime (min)" fill="#DC3545" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [selectedPlant, setSelectedPlant] = useState(3);
+  const [activeView, setActiveView] = useState("data-entry");
 
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-6 text-slate-900 sm:px-6 sm:py-8 lg:px-8">
@@ -410,12 +581,39 @@ function App() {
           </button>
         </header>
 
-        <FactoryChatbot />
-        <DynamicPlantForm plantId={selectedPlant} />
+        <nav className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <button
+            onClick={() => setActiveView("data-entry")}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+              activeView === "data-entry"
+                ? "bg-blue-600 text-white focus:ring-blue-300"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200 focus:ring-slate-300"
+            }`}
+          >
+            Data Entry
+          </button>
+          <button
+            onClick={() => setActiveView("dashboard")}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+              activeView === "dashboard"
+                ? "bg-blue-600 text-white focus:ring-blue-300"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200 focus:ring-slate-300"
+            }`}
+          >
+            Analytics Dashboard
+          </button>
+        </nav>
+
+        {activeView === "data-entry" ? (
+          <>
+            <FactoryChatbot />
+            <DynamicPlantForm plantId={selectedPlant} />
+          </>
+        ) : (
+          <UnidilDashboard />
+        )}
       </div>
     </div>
   );
 }
-
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App />);
+export default App;

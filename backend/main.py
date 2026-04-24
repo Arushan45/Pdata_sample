@@ -2,11 +2,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from functools import lru_cache
 import os
 from pathlib import Path
 from urllib.parse import quote_plus
+from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import json
@@ -232,6 +233,58 @@ def submit_data(data: ProductionData):
         cur.close()
         conn.close()
         return {"status": "success", "message": "Data securely saved to PostgreSQL"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/dashboard/unidil")
+def get_dashboard_data(start_date: Optional[str] = None, end_date: Optional[str] = None):
+    try:
+        today = datetime.today().date()
+        parsed_end_date = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else today
+        parsed_start_date = datetime.strptime(start_date, "%Y-%m-%d").date() if start_date else (today - timedelta(days=7))
+
+        if parsed_start_date > parsed_end_date:
+            raise HTTPException(status_code=400, detail="start_date cannot be after end_date")
+
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            """
+            SELECT production_date, metrics
+            FROM production_data
+            WHERE plant_id = 3
+              AND production_date >= %s
+              AND production_date <= %s
+            ORDER BY production_date ASC;
+            """,
+            (parsed_start_date, parsed_end_date),
+        )
+        results = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        chart_data = []
+        for row in results:
+            metrics = row.get("metrics") or {}
+            date_value = row.get("production_date")
+            date_str = date_value.strftime("%b %d") if date_value else ""
+
+            chart_data.append(
+                {
+                    "date": date_str,
+                    "Corrugator Yield (%)": float(metrics.get("yield_corrugator_pct", 0) or 0),
+                    "Tuber Yield (%)": float(metrics.get("yield_tuber_pct", 0) or 0),
+                    "Corrugator Downtime (min)": float(metrics.get("stoppages_corrugator_min", 0) or 0),
+                    "Tuber Downtime (min)": float(metrics.get("stoppages_tuber_min", 0) or 0),
+                }
+            )
+
+        return chart_data
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD for start_date and end_date.")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
