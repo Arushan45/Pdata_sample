@@ -119,11 +119,15 @@ def build_sqlalchemy_db_uri():
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return pwd_context.verify(normalize_bcrypt_password(plain_password), hashed_password)
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    return pwd_context.hash(normalize_bcrypt_password(password))
+
+
+def normalize_bcrypt_password(password: str) -> bytes:
+    return password.encode("utf-8")[:72]
 
 
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
