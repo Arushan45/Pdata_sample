@@ -118,6 +118,7 @@ def get_agent_executor():
         llm=llm,
         db=db,
         verbose=True,
+        handle_parsing_errors=True,
     )
 
 # --- ENDPOINTS ---
