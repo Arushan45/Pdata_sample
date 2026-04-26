@@ -60,6 +60,24 @@ function DynamicPlantForm({ plantId }) {
     fetchSchema();
   }, [plantId]);
 
+  useEffect(() => {
+    const fetchExistingDataForDate = async () => {
+      try {
+        const response = await apiFetch(`/data/${plantId}/${productionDate}`);
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.detail || "Failed to load existing production data");
+        }
+        setFormData(data && typeof data.metrics === "object" && data.metrics !== null ? data.metrics : {});
+      } catch (err) {
+        console.error("Failed to load existing production data", err);
+        setFormData({});
+      }
+    };
+
+    fetchExistingDataForDate();
+  }, [plantId, productionDate]);
+
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };

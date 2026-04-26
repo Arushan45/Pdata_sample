@@ -236,16 +236,46 @@ def submit_data(data: ProductionData):
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # Save the dynamic JSON data to PostgreSQL
+        # Upsert daily JSON data by plant/date
         cur.execute(
-            "INSERT INTO production_data (plant_id, production_date, metrics) VALUES (%s, %s, %s);",
-            (data.plant_id, data.production_date, json.dumps(data.metrics))
+            """
+            INSERT INTO production_data (plant_id, production_date, metrics)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (plant_id, production_date)
+            DO UPDATE SET metrics = EXCLUDED.metrics;
+            """,
+            (data.plant_id, data.production_date, json.dumps(data.metrics)),
         )
         conn.commit() # Don't forget to commit!
         
         cur.close()
         conn.close()
         return {"status": "success", "message": "Data securely saved to PostgreSQL"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/data/{plant_id}/{production_date}")
+def get_data_for_day(plant_id: int, production_date: str):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            """
+            SELECT metrics
+            FROM production_data
+            WHERE plant_id = %s AND production_date = %s;
+            """,
+            (plant_id, production_date),
+        )
+        result = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if result is None:
+            return {"metrics": {}}
+
+        return {"metrics": result.get("metrics") or {}}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
