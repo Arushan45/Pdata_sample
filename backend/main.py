@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from urllib.parse import quote_plus
 from datetime import datetime, timedelta
+import re
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import json
@@ -85,6 +86,17 @@ class NewField(BaseModel):
 
 class ChatQuery(BaseModel):
     question: str
+
+
+def extract_llm_output_from_parse_error(error_text: str) -> Optional[str]:
+    match = re.search(
+        r"Could not parse LLM output:\s*`?(.*?)`?\s*(?:For troubleshooting|$)",
+        error_text,
+        flags=re.DOTALL,
+    )
+    if match:
+        return match.group(1).strip().strip("`").strip()
+    return None
 
 
 def build_sqlalchemy_db_uri():
@@ -292,9 +304,8 @@ def get_dashboard_data(start_date: Optional[str] = None, end_date: Optional[str]
 
 @app.post("/chat")
 def chat_with_data(query: ChatQuery):
-    try:
-        agent_executor = get_agent_executor()
-        custom_prompt = f"""
+    agent_executor = get_agent_executor()
+    custom_prompt = f"""
 You are a helpful factory data analyst.
 The user is asking: "{query.question}"
 
@@ -305,7 +316,30 @@ Important rules:
 - Never make INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, or other write operations.
 - Answer based only on the database results you retrieve.
 """
+    try:
         response = agent_executor.invoke({"input": custom_prompt})
         return {"answer": response["output"]}
     except Exception as e:
+        error_text = str(e)
+        is_parse_failure = "OUTPUT_PARSING_FAILURE" in error_text or "Could not parse LLM output" in error_text
+
+        if is_parse_failure:
+            extracted_answer = extract_llm_output_from_parse_error(error_text)
+            if extracted_answer:
+                return {"answer": extracted_answer}
+
+            retry_prompt = (
+                f"{custom_prompt}\n\n"
+                "Return the final response in exactly this format:\n"
+                "Final Answer: <your answer>"
+            )
+            try:
+                retry_response = agent_executor.invoke({"input": retry_prompt})
+                retry_output = retry_response.get("output", "")
+                if isinstance(retry_output, str) and retry_output.lower().startswith("final answer:"):
+                    retry_output = retry_output.split(":", 1)[1].strip()
+                return {"answer": retry_output or "I hit a formatting issue, but the query can be retried."}
+            except Exception:
+                return {"answer": "I hit a response-formatting issue. Please try rephrasing your question."}
+
         raise HTTPException(status_code=500, detail=str(e))
