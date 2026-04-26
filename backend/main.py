@@ -30,10 +30,6 @@ app = FastAPI()
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 12
-APP_LOGIN_USERNAME = os.getenv("APP_LOGIN_USERNAME")
-APP_LOGIN_PASSWORD = os.getenv("APP_LOGIN_PASSWORD")
-APP_LOGIN_ROLE = os.getenv("APP_LOGIN_ROLE", "operator")
-APP_LOGIN_PLANT_ID = int(os.getenv("APP_LOGIN_PLANT_ID", "3"))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 fallback_pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
@@ -220,27 +216,37 @@ def read_root():
 
 @app.post("/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    if not APP_LOGIN_USERNAME or not APP_LOGIN_PASSWORD:
-        raise HTTPException(
-            status_code=500,
-            detail="Login credentials are not configured on the server.",
+    try:
+        conn = get_db_connection()
+        ensure_users_table(conn)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            "SELECT username, password_hash, role, plant_id FROM users WHERE username = %s;",
+            (form_data.username,),
         )
+        user = cur.fetchone()
+        cur.close()
+        conn.close()
 
-    if form_data.username != APP_LOGIN_USERNAME or form_data.password != APP_LOGIN_PASSWORD:
-        raise HTTPException(status_code=401, detail="Incorrect username or password")
+        if user is None or not verify_password(form_data.password, user["password_hash"]):
+            raise HTTPException(status_code=401, detail="Incorrect username or password")
 
-    access_token = create_access_token(
-        data={"sub": APP_LOGIN_USERNAME, "role": APP_LOGIN_ROLE, "plant_id": APP_LOGIN_PLANT_ID}
-    )
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": {
-            "username": APP_LOGIN_USERNAME,
-            "role": APP_LOGIN_ROLE,
-            "plant_id": APP_LOGIN_PLANT_ID,
-        },
-    }
+        access_token = create_access_token(
+            data={"sub": user["username"], "role": user["role"], "plant_id": user["plant_id"]}
+        )
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": {
+                "username": user["username"],
+                "role": user["role"],
+                "plant_id": user["plant_id"],
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/schema/{plant_id}")
 def get_schema(plant_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):

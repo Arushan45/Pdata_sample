@@ -5,6 +5,14 @@ TRUNCATE TABLE production_data, plant_schemas RESTART IDENTITY CASCADE;
 ALTER TABLE production_data
 ADD COLUMN IF NOT EXISTS production_date DATE DEFAULT CURRENT_DATE;
 
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'operator',
+    plant_id INTEGER NOT NULL DEFAULT 3
+);
+
 INSERT INTO plant_schemas (plant_id, plant_name, form_schema)
 VALUES (
     3,
