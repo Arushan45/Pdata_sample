@@ -1,17 +1,20 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from functools import lru_cache
 import os
 from pathlib import Path
 from urllib.parse import quote_plus
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import re
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import json
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 
 try:
     from langchain_community.agent_toolkits import create_sql_agent
@@ -23,6 +26,13 @@ except ImportError:
     ChatGoogleGenerativeAI = None
 
 app = FastAPI()
+
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-in-production")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 12
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
 allowed_origin_regex = os.getenv(
     "ALLOWED_ORIGIN_REGEX",
@@ -108,6 +118,56 @@ def build_sqlalchemy_db_uri():
     return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
 
 
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def ensure_users_table(conn) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'operator',
+            plant_id INTEGER NOT NULL DEFAULT 3
+        );
+        """
+    )
+    conn.commit()
+    cur.close()
+
+
+def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        role = payload.get("role")
+        plant_id = payload.get("plant_id")
+        if username is None or role is None or plant_id is None:
+            raise credentials_exception
+        return {"username": username, "role": role, "plant_id": int(plant_id)}
+    except (JWTError, ValueError):
+        raise credentials_exception
+
+
 @lru_cache(maxsize=1)
 def get_agent_executor():
     if create_sql_agent is None or SQLDatabase is None or ChatGoogleGenerativeAI is None:
@@ -139,9 +199,60 @@ def get_agent_executor():
 def read_root():
     return RedirectResponse(url="/docs")
 
-@app.get("/schema/{plant_id}")
-def get_schema(plant_id: int):
+
+@app.post("/login")
+def login(form_data: OAuth2PasswordRequestForm = Depends()):
     try:
+        conn = get_db_connection()
+        ensure_users_table(conn)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            "SELECT username, password_hash, role, plant_id FROM users WHERE username = %s;",
+            (form_data.username,),
+        )
+        user = cur.fetchone()
+
+        if user is None:
+            password_hash = get_password_hash(form_data.password)
+            cur.execute(
+                """
+                INSERT INTO users (username, password_hash, role, plant_id)
+                VALUES (%s, %s, %s, %s)
+                RETURNING username, role, plant_id;
+                """,
+                (form_data.username, password_hash, "operator", 3),
+            )
+            user = cur.fetchone()
+            conn.commit()
+        else:
+            if not verify_password(form_data.password, user["password_hash"]):
+                raise HTTPException(status_code=401, detail="Incorrect username or password")
+
+        cur.close()
+        conn.close()
+
+        access_token = create_access_token(
+            data={"sub": user["username"], "role": user["role"], "plant_id": user["plant_id"]}
+        )
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": {
+                "username": user["username"],
+                "role": user["role"],
+                "plant_id": user["plant_id"],
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/schema/{plant_id}")
+def get_schema(plant_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    try:
+        if current_user["role"] != "admin" and current_user["plant_id"] != plant_id:
+            raise HTTPException(status_code=403, detail="Forbidden for this plant")
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("SELECT form_schema FROM plant_schemas WHERE plant_id = %s;", (plant_id,))
@@ -158,8 +269,10 @@ def get_schema(plant_id: int):
 
 
 @app.put("/schema/{plant_id}/add-field")
-def add_field_to_schema(plant_id: int, field: NewField):
+def add_field_to_schema(plant_id: int, field: NewField, current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
+        if current_user["role"] != "admin" and current_user["plant_id"] != plant_id:
+            raise HTTPException(status_code=403, detail="Forbidden for this plant")
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("SELECT form_schema FROM plant_schemas WHERE plant_id = %s;", (plant_id,))
@@ -196,8 +309,10 @@ def add_field_to_schema(plant_id: int, field: NewField):
 
 
 @app.delete("/schema/{plant_id}/remove-field/{field_name}")
-def remove_field_from_schema(plant_id: int, field_name: str):
+def remove_field_from_schema(plant_id: int, field_name: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
+        if current_user["role"] != "admin" and current_user["plant_id"] != plant_id:
+            raise HTTPException(status_code=403, detail="Forbidden for this plant")
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("SELECT form_schema FROM plant_schemas WHERE plant_id = %s;", (plant_id,))
@@ -231,8 +346,10 @@ def remove_field_from_schema(plant_id: int, field_name: str):
 
 
 @app.post("/data/submit")
-def submit_data(data: ProductionData):
+def submit_data(data: ProductionData, current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
+        if current_user["role"] != "admin" and current_user["plant_id"] != data.plant_id:
+            raise HTTPException(status_code=403, detail="Forbidden for this plant")
         conn = get_db_connection()
         cur = conn.cursor()
         
@@ -256,8 +373,10 @@ def submit_data(data: ProductionData):
 
 
 @app.get("/data/{plant_id}/{production_date}")
-def get_data_for_day(plant_id: int, production_date: str):
+def get_data_for_day(plant_id: int, production_date: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
+        if current_user["role"] != "admin" and current_user["plant_id"] != plant_id:
+            raise HTTPException(status_code=403, detail="Forbidden for this plant")
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(
@@ -281,8 +400,22 @@ def get_data_for_day(plant_id: int, production_date: str):
 
 
 @app.get("/api/dashboard/unidil")
-def get_dashboard_data(start_date: Optional[str] = None, end_date: Optional[str] = None):
+def get_dashboard_data(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     try:
+        if current_user["role"] != "admin" and current_user["plant_id"] != 3:
+            raise HTTPException(status_code=403, detail="Forbidden for this plant")
+        def to_float_metric(raw_value: Any) -> float:
+            if raw_value in ("", None):
+                return 0.0
+            try:
+                return float(raw_value)
+            except (TypeError, ValueError):
+                return 0.0
+
         today = datetime.today().date()
         parsed_end_date = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else today
         parsed_start_date = datetime.strptime(start_date, "%Y-%m-%d").date() if start_date else (today - timedelta(days=7))
@@ -316,10 +449,10 @@ def get_dashboard_data(start_date: Optional[str] = None, end_date: Optional[str]
             chart_data.append(
                 {
                     "date": date_str,
-                    "Corrugator Yield (%)": float(metrics.get("yield_corrugator_pct", 0) or 0),
-                    "Tuber Yield (%)": float(metrics.get("yield_tuber_pct", 0) or 0),
-                    "Corrugator Downtime (min)": float(metrics.get("stoppages_corrugator_min", 0) or 0),
-                    "Tuber Downtime (min)": float(metrics.get("stoppages_tuber_min", 0) or 0),
+                    "Corrugator Yield (%)": to_float_metric(metrics.get("yield_corrugator_pct", 0)),
+                    "Tuber Yield (%)": to_float_metric(metrics.get("yield_tuber_pct", 0)),
+                    "Corrugator Downtime (min)": to_float_metric(metrics.get("stoppages_corrugator_min", 0)),
+                    "Tuber Downtime (min)": to_float_metric(metrics.get("stoppages_tuber_min", 0)),
                 }
             )
 
@@ -333,7 +466,7 @@ def get_dashboard_data(start_date: Optional[str] = None, end_date: Optional[str]
 
 
 @app.post("/chat")
-def chat_with_data(query: ChatQuery):
+def chat_with_data(query: ChatQuery, current_user: Dict[str, Any] = Depends(get_current_user)):
     agent_executor = get_agent_executor()
     custom_prompt = f"""
 You are a helpful factory data analyst.

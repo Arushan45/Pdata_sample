@@ -17,12 +17,18 @@ const API_BASE_CANDIDATES = isLocalHost
   ? ["http://127.0.0.1:8001", "http://127.0.0.1:8000", "https://backend-nine-murex-11.vercel.app"]
   : ["https://backend-nine-murex-11.vercel.app"];
 
-async function apiFetch(path, options = {}) {
+async function apiFetch(path, options = {}, userToken = "") {
+  const mergedHeaders = { ...(options.headers || {}) };
+  if (userToken) {
+    mergedHeaders.Authorization = `Bearer ${userToken}`;
+  }
+
+  const requestOptions = { ...options, headers: mergedHeaders };
   let lastNetworkError = null;
 
   for (const baseUrl of API_BASE_CANDIDATES) {
     try {
-      return await fetch(`${baseUrl}${path}`, options);
+      return await fetch(`${baseUrl}${path}`, requestOptions);
     } catch (err) {
       lastNetworkError = err;
     }
@@ -31,7 +37,7 @@ async function apiFetch(path, options = {}) {
   throw lastNetworkError || new Error("Backend is not reachable");
 }
 
-function DynamicPlantForm({ plantId }) {
+function DynamicPlantForm({ plantId, userToken }) {
   const [schema, setSchema] = useState(null);
   const [formData, setFormData] = useState({});
   const [productionDate, setProductionDate] = useState(new Date().toISOString().split("T")[0]);
@@ -41,7 +47,7 @@ function DynamicPlantForm({ plantId }) {
 
   const fetchSchema = async () => {
     try {
-      const response = await apiFetch(`/schema/${plantId}`);
+      const response = await apiFetch(`/schema/${plantId}`, {}, userToken);
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.detail || "Failed to load schema");
@@ -63,7 +69,7 @@ function DynamicPlantForm({ plantId }) {
   useEffect(() => {
     const fetchExistingDataForDate = async () => {
       try {
-        const response = await apiFetch(`/data/${plantId}/${productionDate}`);
+        const response = await apiFetch(`/data/${plantId}/${productionDate}`, {}, userToken);
         const data = await response.json();
         if (!response.ok) {
           throw new Error(data.detail || "Failed to load existing production data");
@@ -79,7 +85,8 @@ function DynamicPlantForm({ plantId }) {
   }, [plantId, productionDate]);
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value === "" ? "" : value }));
   };
 
   const handleSubmit = async (e) => {
@@ -93,7 +100,7 @@ function DynamicPlantForm({ plantId }) {
           production_date: productionDate,
           metrics: formData
         })
-      });
+      }, userToken);
       const result = await response.json();
       if (!response.ok) {
         throw new Error(result.detail || "Error submitting data");
@@ -114,7 +121,7 @@ function DynamicPlantForm({ plantId }) {
     try {
       const response = await apiFetch(`/schema/${plantId}/remove-field/${encodeURIComponent(field.name)}`, {
         method: "DELETE"
-      });
+      }, userToken);
       const result = await response.json();
       if (!response.ok) {
         if (response.status === 404 && result.detail === "Not Found") {
@@ -160,7 +167,7 @@ function DynamicPlantForm({ plantId }) {
           label: trimmedLabel,
           type: newField.type
         })
-      });
+      }, userToken);
 
       const result = await response.json();
       if (!response.ok) {
@@ -229,7 +236,6 @@ function DynamicPlantForm({ plantId }) {
                 name={field.name}
                 value={formData[field.name] || ""}
                 onChange={handleChange}
-                required
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
               />
             </div>
@@ -257,6 +263,8 @@ function DynamicPlantForm({ plantId }) {
               className="w-full max-w-xs rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
             />
           </div>
+
+          <p className="text-sm text-slate-600">Note: Leave fields blank if data is N/A.</p>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 xl:gap-5">
             {renderFieldCard(
@@ -354,7 +362,7 @@ function DynamicPlantForm({ plantId }) {
   );
 }
 
-function FactoryChatbot() {
+function FactoryChatbot({ userToken }) {
   const [question, setQuestion] = useState("");
   const [chatLog, setChatLog] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -376,7 +384,7 @@ function FactoryChatbot() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: trimmedQuestion })
-      });
+      }, userToken);
       const result = await response.json();
       if (!response.ok) {
         throw new Error(result.detail || "AI request failed");
@@ -436,7 +444,7 @@ function FactoryChatbot() {
   );
 }
 
-function UnidilDashboard() {
+function UnidilDashboard({ userToken }) {
   const today = new Date();
   const defaultEndDate = today.toISOString().split("T")[0];
   const startSeed = new Date(today);
@@ -459,7 +467,7 @@ function UnidilDashboard() {
           start_date: appliedFilter.startDate,
           end_date: appliedFilter.endDate
         });
-        const response = await apiFetch(`/api/dashboard/unidil?${params.toString()}`);
+        const response = await apiFetch(`/api/dashboard/unidil?${params.toString()}`, {}, userToken);
         const data = await response.json();
         if (!response.ok) {
           throw new Error(data.detail || "Failed to load dashboard data");
@@ -579,9 +587,162 @@ function UnidilDashboard() {
   );
 }
 
+function LoginScreen({ username, password, onUsernameChange, onPasswordChange, onSubmit, isLoading, error }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-lg sm:p-7">
+        <h1 className="text-2xl font-bold text-slate-900">Factory Login</h1>
+        <p className="mt-1 text-sm text-slate-600">Sign in to access the command center.</p>
+
+        <form onSubmit={onSubmit} className="mt-6 space-y-4">
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">Username</label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => onUsernameChange(e.target.value)}
+              required
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => onPasswordChange(e.target.value)}
+              required
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+            />
+          </div>
+          {error && (
+            <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {error}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isLoading ? "Signing In..." : "Login"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userToken, setUserToken] = useState("");
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [selectedPlant, setSelectedPlant] = useState(3);
   const [activeView, setActiveView] = useState("data-entry");
+
+  useEffect(() => {
+    const storedToken = localStorage.getItem("factory_access_token");
+    const storedUser = localStorage.getItem("factory_current_user");
+    if (storedToken) {
+      setUserToken(storedToken);
+      setIsAuthenticated(true);
+      if (storedUser) {
+        try {
+          const parsedUser = JSON.parse(storedUser);
+          setCurrentUser(parsedUser);
+          if (parsedUser?.plant_id) {
+            setSelectedPlant(parsedUser.plant_id);
+          }
+        } catch {
+          setCurrentUser(null);
+        }
+      }
+    }
+  }, []);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoginError("");
+    setIsLoggingIn(true);
+
+    const formData = new URLSearchParams();
+    formData.append("username", loginUsername);
+    formData.append("password", loginPassword);
+
+    try {
+      let response;
+      try {
+        response = await fetch("http://localhost:8000/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: formData.toString()
+        });
+      } catch {
+        response = await apiFetch(
+          "/login",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: formData.toString()
+          },
+          ""
+        );
+      }
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || "Login failed");
+      }
+
+      const token = result.access_token || "";
+      const user = result.user || null;
+      if (!token) {
+        throw new Error("Access token missing from login response");
+      }
+
+      localStorage.setItem("factory_access_token", token);
+      localStorage.setItem("factory_current_user", JSON.stringify(user || {}));
+      setUserToken(token);
+      setCurrentUser(user);
+      setIsAuthenticated(true);
+      if (user?.plant_id) {
+        setSelectedPlant(user.plant_id);
+      }
+      setLoginPassword("");
+    } catch (err) {
+      setLoginError(err.message || "Login failed");
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("factory_access_token");
+    localStorage.removeItem("factory_current_user");
+    setIsAuthenticated(false);
+    setUserToken("");
+    setCurrentUser(null);
+    setLoginPassword("");
+    setLoginError("");
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <LoginScreen
+        username={loginUsername}
+        password={loginPassword}
+        onUsernameChange={setLoginUsername}
+        onPasswordChange={setLoginPassword}
+        onSubmit={handleLogin}
+        isLoading={isLoggingIn}
+        error={loginError}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-6 text-slate-900 sm:px-6 sm:py-8 lg:px-8">
@@ -597,6 +758,11 @@ function App() {
           >
             UNIDIL
           </button>
+          {currentUser && (
+            <p className="mt-2 text-xs text-slate-500">
+              Signed in as <span className="font-semibold">{currentUser.username}</span> ({currentUser.role})
+            </p>
+          )}
         </header>
 
         <nav className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
@@ -620,15 +786,21 @@ function App() {
           >
             Analytics Dashboard
           </button>
+          <button
+            onClick={handleLogout}
+            className="ml-auto rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1"
+          >
+            Logout
+          </button>
         </nav>
 
         {activeView === "data-entry" ? (
           <>
-            <FactoryChatbot />
-            <DynamicPlantForm plantId={selectedPlant} />
+            <FactoryChatbot userToken={userToken} />
+            <DynamicPlantForm plantId={selectedPlant} userToken={userToken} />
           </>
         ) : (
-          <UnidilDashboard />
+          <UnidilDashboard userToken={userToken} />
         )}
       </div>
     </div>
