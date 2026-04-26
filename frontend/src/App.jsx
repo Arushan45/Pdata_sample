@@ -760,7 +760,7 @@ function App() {
           </button>
           {currentUser && (
             <p className="mt-2 text-xs text-slate-500">
-              Signed in as <span className="font-semibold">{currentUser.username}</span> ({currentUser.role})
+              Signed in as <span className="font-semibold">{currentUser.username}</span>
             </p>
           )}
         </header>
