@@ -32,6 +32,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 12
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+fallback_pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
 allowed_origin_regex = os.getenv(
@@ -119,11 +120,20 @@ def build_sqlalchemy_db_uri():
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(normalize_bcrypt_password(plain_password), hashed_password)
+    try:
+        return pwd_context.verify(normalize_bcrypt_password(plain_password), hashed_password)
+    except Exception:
+        try:
+            return fallback_pwd_context.verify(plain_password, hashed_password)
+        except Exception:
+            return False
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(normalize_bcrypt_password(password))
+    try:
+        return pwd_context.hash(normalize_bcrypt_password(password))
+    except Exception:
+        return fallback_pwd_context.hash(password)
 
 
 def normalize_bcrypt_password(password: str) -> bytes:
