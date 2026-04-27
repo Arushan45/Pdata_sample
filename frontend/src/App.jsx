@@ -235,6 +235,7 @@ function DynamicPlantForm({ plantId, userToken }) {
               </div>
               <input
                 type={field.type}
+                step={field.type === "number" ? "0.01" : undefined}
                 name={field.name}
                 value={formData[field.name] || ""}
                 onChange={handleChange}
@@ -599,6 +600,15 @@ function UnidilDashboard({ userToken }) {
   }, [formattedChartData, selectedMetric]);
 
   const machineLabel = selectedMachine.charAt(0).toUpperCase() + selectedMachine.slice(1);
+  const formatTwoDecimals = (value) => {
+    const numeric = Number(value);
+    if (Number.isNaN(numeric)) {
+      return value;
+    }
+    return numeric.toFixed(2);
+  };
+
+  const tooltipFormatter = (value, name) => [formatTwoDecimals(value), name];
   const metricTitleMap = {
     actual_vs_planned: `${machineLabel} Actual vs Planned (MT)`,
     actual: `${machineLabel} Actual Output`,
@@ -706,8 +716,8 @@ function UnidilDashboard({ userToken }) {
               <BarChart data={formattedChartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
+                <YAxis tickFormatter={formatTwoDecimals} />
+                <Tooltip formatter={tooltipFormatter} />
                 <Legend />
                 <Bar dataKey="planned" name="Planned (MT)" fill="#6366f1" radius={[6, 6, 0, 0]} />
                 <Bar dataKey="actual" name="Actual (MT)" fill="#0ea5e9" radius={[6, 6, 0, 0]} />
@@ -717,8 +727,8 @@ function UnidilDashboard({ userToken }) {
               <LineChart data={formattedChartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
+                <YAxis tickFormatter={formatTwoDecimals} />
+                <Tooltip formatter={tooltipFormatter} />
                 <Legend />
                 <Line type="monotone" dataKey="value" name="Yield (%)" stroke="#2563eb" strokeWidth={2.5} dot={{ r: 3 }} />
               </LineChart>
@@ -727,8 +737,8 @@ function UnidilDashboard({ userToken }) {
               <BarChart data={formattedChartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
+                <YAxis tickFormatter={formatTwoDecimals} />
+                <Tooltip formatter={tooltipFormatter} />
                 <Legend />
                 <Bar dataKey="value" name="Actual Output" fill="#0ea5e9" radius={[6, 6, 0, 0]} />
               </BarChart>
@@ -737,8 +747,8 @@ function UnidilDashboard({ userToken }) {
               <AreaChart data={formattedChartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
+                <YAxis tickFormatter={formatTwoDecimals} />
+                <Tooltip formatter={tooltipFormatter} />
                 <Legend />
                 <Area
                   type="monotone"
@@ -754,8 +764,8 @@ function UnidilDashboard({ userToken }) {
               <BarChart data={formattedChartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
+                <YAxis tickFormatter={formatTwoDecimals} />
+                <Tooltip formatter={tooltipFormatter} />
                 <Legend />
                 <Bar dataKey="value" name="Rejections (MT)" fill="#ef4444" radius={[6, 6, 0, 0]} />
               </BarChart>
