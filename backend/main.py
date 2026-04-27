@@ -443,12 +443,15 @@ def get_dashboard_data(
         chart_data = []
         for row in results:
             metrics = row.get("metrics") or {}
+            if not isinstance(metrics, dict):
+                metrics = {}
             date_value = row.get("production_date")
             date_str = date_value.strftime("%b %d") if date_value else ""
 
             chart_data.append(
                 {
                     "date": date_str,
+                    **metrics,
                     "Corrugator Yield (%)": to_float_metric(metrics.get("yield_corrugator_pct", 0)),
                     "Tuber Yield (%)": to_float_metric(metrics.get("yield_tuber_pct", 0)),
                     "Corrugator Downtime (min)": to_float_metric(metrics.get("stoppages_corrugator_min", 0)),

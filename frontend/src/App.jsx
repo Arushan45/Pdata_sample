@@ -3,6 +3,8 @@ import {
   Line,
   BarChart,
   Bar,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -10,7 +12,7 @@ import {
   Legend,
   ResponsiveContainer
 } from "recharts";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 const isLocalHost = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
 
 const API_BASE_CANDIDATES = isLocalHost
@@ -456,6 +458,8 @@ function UnidilDashboard({ userToken }) {
   const [error, setError] = useState("");
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);
+  const [selectedMachine, setSelectedMachine] = useState("corrugator");
+  const [selectedMetric, setSelectedMetric] = useState("actual_vs_planned");
   const [appliedFilter, setAppliedFilter] = useState({ startDate: defaultStartDate, endDate: defaultEndDate });
 
   useEffect(() => {
@@ -489,20 +493,124 @@ function UnidilDashboard({ userToken }) {
       return;
     }
 
+    setError("");
     setAppliedFilter({ startDate, endDate });
+  };
+
+  const metricKeyCandidates = useMemo(
+    () => ({
+      actual_vs_planned: {
+        corrugator: {
+          planned: ["planned_corrugator_mt", "corrugator_planned_mt"],
+          actual: ["actual_corrugator_mt", "corrugator_actual_mt"]
+        },
+        tuber: {
+          planned: ["planned_tuber_mt", "tuber_planned_mt"],
+          actual: ["actual_tuber_mt", "tuber_actual_mt"]
+        },
+        printing: {
+          planned: ["planned_printing_mt", "printing_planned_mt"],
+          actual: ["actual_printing_mt", "printing_actual_mt"]
+        },
+        finishing: {
+          planned: ["planned_finishing_mt", "finishing_planned_mt"],
+          actual: ["actual_finishing_mt", "finishing_actual_mt"]
+        }
+      },
+      yield: {
+        corrugator: ["yield_corrugator_pct", "corrugator_yield_pct", "Corrugator Yield (%)"],
+        tuber: ["yield_tuber_pct", "tuber_yield_pct", "Tuber Yield (%)"],
+        printing: ["yield_printing_pct", "printing_yield_pct", "Printing Yield (%)"],
+        finishing: ["yield_finishing_pct", "finishing_yield_pct", "Finishing Yield (%)"]
+      },
+      stoppages: {
+        corrugator: ["stoppages_corrugator_min", "corrugator_stoppages_min", "Corrugator Downtime (min)"],
+        tuber: ["stoppages_tuber_min", "tuber_stoppages_min", "Tuber Downtime (min)"],
+        printing: ["stoppages_printing_min", "printing_stoppages_min", "Printing Downtime (min)"],
+        finishing: ["stoppages_finishing_min", "finishing_stoppages_min", "Finishing Downtime (min)"]
+      },
+      rejections: {
+        corrugator: ["rejections_corrugator_mt", "corrugator_rejections_mt", "rejected_corrugator_mt"],
+        tuber: ["rejections_tuber_mt", "tuber_rejections_mt", "rejected_tuber_mt"],
+        printing: ["rejections_printing_mt", "printing_rejections_mt", "rejected_printing_mt"],
+        finishing: ["rejections_finishing_mt", "finishing_rejections_mt", "rejected_finishing_mt"]
+      }
+    }),
+    []
+  );
+
+  const getFirstNumericValue = (row, candidates) => {
+    for (const key of candidates) {
+      const rawValue = row?.[key];
+      if (rawValue === "" || rawValue === null || rawValue === undefined) {
+        continue;
+      }
+      const parsed = Number(rawValue);
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+    }
+    return null;
+  };
+
+  const formattedChartData = useMemo(() => {
+    const selectedConfig = metricKeyCandidates[selectedMetric]?.[selectedMachine];
+    if (!selectedConfig) {
+      return [];
+    }
+
+    return chartData.map((row) => {
+      const base = { date: row.date };
+
+      if (selectedMetric === "actual_vs_planned") {
+        const plannedValue = getFirstNumericValue(row, selectedConfig.planned || []);
+        const actualValue = getFirstNumericValue(row, selectedConfig.actual || []);
+        return {
+          ...base,
+          planned: plannedValue,
+          actual: actualValue
+        };
+      }
+
+      const value = getFirstNumericValue(row, selectedConfig || []);
+      return {
+        ...base,
+        value
+      };
+    });
+  }, [chartData, selectedMetric, selectedMachine, metricKeyCandidates]);
+
+  const isMetricAvailableForSelection = useMemo(() => {
+    if (!formattedChartData.length) {
+      return false;
+    }
+
+    if (selectedMetric === "actual_vs_planned") {
+      return formattedChartData.some((entry) => entry.planned !== null || entry.actual !== null);
+    }
+
+    return formattedChartData.some((entry) => entry.value !== null);
+  }, [formattedChartData, selectedMetric]);
+
+  const machineLabel = selectedMachine.charAt(0).toUpperCase() + selectedMachine.slice(1);
+  const metricTitleMap = {
+    actual_vs_planned: `${machineLabel} Actual vs Planned (MT)`,
+    yield: `${machineLabel} Yield Trend (%)`,
+    stoppages: `${machineLabel} Stoppages (min)`,
+    rejections: `${machineLabel} Rejections (MT)`
   };
 
   const filterBar = (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-col items-end gap-4 md:flex-row md:items-end md:justify-between">
-        <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 md:w-auto">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label className="block text-sm font-medium text-slate-700">
             <span className="mb-1 block">Start Date</span>
             <input
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition hover:border-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
             />
           </label>
           <label className="block text-sm font-medium text-slate-700">
@@ -511,15 +619,41 @@ function UnidilDashboard({ userToken }) {
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition hover:border-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
             />
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            <span className="mb-1 block">Select Machine</span>
+            <select
+              value={selectedMachine}
+              onChange={(e) => setSelectedMachine(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 shadow-sm outline-none transition hover:bg-slate-100 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+            >
+              <option value="corrugator">Corrugator</option>
+              <option value="tuber">Tuber</option>
+              <option value="printing">Printing</option>
+              <option value="finishing">Finishing</option>
+            </select>
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            <span className="mb-1 block">Select Metric</span>
+            <select
+              value={selectedMetric}
+              onChange={(e) => setSelectedMetric(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 shadow-sm outline-none transition hover:bg-slate-100 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+            >
+              <option value="actual_vs_planned">Actual vs Planned</option>
+              <option value="yield">Yield</option>
+              <option value="stoppages">Stoppages</option>
+              <option value="rejections">Rejections</option>
+            </select>
           </label>
         </div>
 
         <button
           type="button"
           onClick={handleApplyFilter}
-          className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300 md:w-auto"
+          className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300 lg:w-auto"
         >
           Apply Filter
         </button>
@@ -552,36 +686,67 @@ function UnidilDashboard({ userToken }) {
   return (
     <div className="space-y-4">
       {filterBar}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <div className="rounded-lg bg-white p-4 shadow-md">
-          <h3 className="mb-3 text-lg font-semibold text-slate-900">Yield Trends</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="Corrugator Yield (%)" stroke="#007BFF" strokeWidth={2} />
-              <Line type="monotone" dataKey="Tuber Yield (%)" stroke="#28A745" strokeWidth={2} />
-            </LineChart>
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-md sm:p-5">
+        <h3 className="mb-4 text-lg font-semibold text-slate-900">{metricTitleMap[selectedMetric]}</h3>
+        {!isMetricAvailableForSelection ? (
+          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
+            Data metric not tracked for this machine.
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={380}>
+            {selectedMetric === "actual_vs_planned" ? (
+              <BarChart data={formattedChartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="planned" name="Planned (MT)" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="actual" name="Actual (MT)" fill="#0ea5e9" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            ) : null}
+            {selectedMetric === "yield" ? (
+              <LineChart data={formattedChartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="value" name="Yield (%)" stroke="#2563eb" strokeWidth={2.5} dot={{ r: 3 }} />
+              </LineChart>
+            ) : null}
+            {selectedMetric === "stoppages" ? (
+              <AreaChart data={formattedChartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  name="Stoppages (min)"
+                  stroke="#ea580c"
+                  fill="#fdba74"
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            ) : null}
+            {selectedMetric === "rejections" ? (
+              <BarChart data={formattedChartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="value" name="Rejections (MT)" fill="#ef4444" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            ) : null}
           </ResponsiveContainer>
-        </div>
-
-        <div className="rounded-lg bg-white p-4 shadow-md">
-          <h3 className="mb-3 text-lg font-semibold text-slate-900">Downtime Analysis</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="Corrugator Downtime (min)" fill="#FFC107" />
-              <Bar dataKey="Tuber Downtime (min)" fill="#DC3545" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        )}
+        {!chartData.length && !isLoading && !error && (
+          <p className="mt-4 text-sm text-slate-500">No dashboard records found for the selected date range.</p>
+        )}
       </div>
     </div>
   );
