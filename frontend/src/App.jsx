@@ -505,8 +505,8 @@ function UnidilDashboard({ userToken }) {
           actual: ["actual_corrugator_mt", "corrugator_actual_mt"]
         },
         tuber: {
-          planned: ["planned_tuber_mt", "tuber_planned_mt"],
-          actual: ["actual_tuber_mt", "tuber_actual_mt"]
+          planned: ["planned_tuber_qty", "planned_tuber_mt", "tuber_planned_qty", "tuber_planned_mt"],
+          actual: ["actual_tuber_qty", "actual_tuber_mt", "tuber_actual_qty", "tuber_actual_mt"]
         },
         printing: {
           planned: ["planned_printing_mt", "printing_planned_mt"],
@@ -517,6 +517,12 @@ function UnidilDashboard({ userToken }) {
           actual: ["actual_finishing_mt", "finishing_actual_mt"]
         }
       },
+      actual: {
+        corrugator: ["actual_corrugator_mt", "corrugator_actual_mt"],
+        tuber: ["actual_tuber_qty", "actual_tuber_mt", "tuber_actual_qty", "tuber_actual_mt"],
+        printing: ["actual_printing_mt", "printing_actual_mt"],
+        finishing: ["actual_finishing_mt", "finishing_actual_mt"]
+      },
       yield: {
         corrugator: ["yield_corrugator_pct", "corrugator_yield_pct", "Corrugator Yield (%)"],
         tuber: ["yield_tuber_pct", "tuber_yield_pct", "Tuber Yield (%)"],
@@ -526,12 +532,12 @@ function UnidilDashboard({ userToken }) {
       stoppages: {
         corrugator: ["stoppages_corrugator_min", "corrugator_stoppages_min", "Corrugator Downtime (min)"],
         tuber: ["stoppages_tuber_min", "tuber_stoppages_min", "Tuber Downtime (min)"],
-        printing: ["stoppages_printing_min", "printing_stoppages_min", "Printing Downtime (min)"],
+        printing: ["stoppages_printing_h", "stoppages_printing_min", "printing_stoppages_h", "printing_stoppages_min", "Printing Downtime (h)", "Printing Downtime (min)"],
         finishing: ["stoppages_finishing_min", "finishing_stoppages_min", "Finishing Downtime (min)"]
       },
       rejections: {
         corrugator: ["rejections_corrugator_mt", "corrugator_rejections_mt", "rejected_corrugator_mt"],
-        tuber: ["rejections_tuber_mt", "tuber_rejections_mt", "rejected_tuber_mt"],
+        tuber: ["rejections_tuber_qty", "rejections_tuber_mt", "tuber_rejections_qty", "tuber_rejections_mt", "rejected_tuber_mt"],
         printing: ["rejections_printing_mt", "printing_rejections_mt", "rejected_printing_mt"],
         finishing: ["rejections_finishing_mt", "finishing_rejections_mt", "rejected_finishing_mt"]
       }
@@ -595,9 +601,10 @@ function UnidilDashboard({ userToken }) {
   const machineLabel = selectedMachine.charAt(0).toUpperCase() + selectedMachine.slice(1);
   const metricTitleMap = {
     actual_vs_planned: `${machineLabel} Actual vs Planned (MT)`,
+    actual: `${machineLabel} Actual Output`,
     yield: `${machineLabel} Yield Trend (%)`,
-    stoppages: `${machineLabel} Stoppages (min)`,
-    rejections: `${machineLabel} Rejections (MT)`
+    stoppages: `${machineLabel} Stoppages`,
+    rejections: `${machineLabel} Rejections`
   };
 
   const filterBar = (
@@ -643,6 +650,7 @@ function UnidilDashboard({ userToken }) {
               className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 shadow-sm outline-none transition hover:bg-slate-100 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
             >
               <option value="actual_vs_planned">Actual vs Planned</option>
+              <option value="actual">Actual</option>
               <option value="yield">Yield</option>
               <option value="stoppages">Stoppages</option>
               <option value="rejections">Rejections</option>
@@ -714,6 +722,16 @@ function UnidilDashboard({ userToken }) {
                 <Legend />
                 <Line type="monotone" dataKey="value" name="Yield (%)" stroke="#2563eb" strokeWidth={2.5} dot={{ r: 3 }} />
               </LineChart>
+            ) : null}
+            {selectedMetric === "actual" ? (
+              <BarChart data={formattedChartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="value" name="Actual Output" fill="#0ea5e9" radius={[6, 6, 0, 0]} />
+              </BarChart>
             ) : null}
             {selectedMetric === "stoppages" ? (
               <AreaChart data={formattedChartData}>
